@@ -40,7 +40,7 @@ h2.dealt{color:var(--ember)} h2.taken{color:#c0392b}
 .ramp{display:inline-flex;height:12px;border-radius:2px;overflow:hidden}
 .ramp i{display:block;width:16px;height:12px}
 .sw{display:inline-block;width:16px;height:12px;border-radius:2px;vertical-align:-2px}
-#pop{position:fixed;z-index:20;pointer-events:none;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:13px;line-height:1.45;width:300px;max-width:calc(100vw - 24px);box-shadow:0 8px 26px rgba(0,0,0,.22)}
+#pop{position:fixed;z-index:20;pointer-events:none;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:13px;line-height:1.45;width:340px;max-width:calc(100vw - 24px);box-shadow:0 8px 26px rgba(0,0,0,.22)}
 #pop h3{font:600 18px/1.1 var(--display);margin:0}
 #pop .r{font:500 12px var(--mono);color:var(--muted);margin:2px 0 6px}
 #pop .ln{display:flex;justify-content:space-between;gap:10px;font-variant-numeric:tabular-nums}
@@ -51,6 +51,10 @@ h2.dealt{color:var(--ember)} h2.taken{color:#c0392b}
 .raid+.raid{border-top:1px solid var(--line);padding-top:26px;margin-top:10px}
 .raidhead .rtitle{font:600 30px/1.05 var(--display);letter-spacing:.01em;text-transform:none;margin:2px 0 0;color:var(--ink)}
 #raids{display:flex;flex-direction:column;gap:22px}
+.views{display:inline-flex;gap:4px}
+.vbtn{font:500 13px var(--body);color:var(--ink);background:var(--chip);border:1px solid var(--line);border-radius:6px;padding:5px 11px;cursor:pointer}
+.vbtn.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.vbtn:focus-visible{outline:2px solid var(--ember);outline-offset:2px}
 .foot{font-size:12.5px;color:var(--muted);max-width:90ch}
 </style>
 </head>
@@ -64,6 +68,7 @@ h2.dealt{color:var(--ember)} h2.taken{color:#c0392b}
   </header>
 
   <div class="controls">
+    <span class="views" role="group" aria-label="What the heatmaps show"><button type="button" class="vbtn" data-view="combined">Combined</button><button type="button" class="vbtn" data-view="dealt">Damage dealt</button><button type="button" class="vbtn" data-view="taken">Damage taken</button></span>
     <label><input type="checkbox" id="showFp" checked> Priestess grades (raid pet, 0 pieces)</label>
     <label><input type="checkbox" id="showRec" checked> Recommended resistance per row</label>
   </div>
@@ -101,22 +106,41 @@ const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim
 const n=v=>Math.round(v).toLocaleString();
 const fmtX=v=>'×'+(v>=10?v.toFixed(1):v.toFixed(2));
 const rampD=DEALT_BANDS.map(c=>`<i style="background:${c}"></i>`).join(''), rampT=TAKEN_BANDS.slice().reverse().map(c=>`<i style="background:${c}"></i>`).join('');
-$('raids').innerHTML=RAIDS.map(R=>{const first=R.names[R.rows[0][1]],last=R.names[R.rows[19][1]];return `
+// Combined (user, 2026-11-06: "aren't we able to combine damage dealt / damage taken?"): damage your corps absorb to
+// kill the boss, against normal = damage taken multiplier × kill-time multiplier (1 / damage dealt).
+const combined=(r,x)=>taken(r,x)/dealt(r,x);
+const COMB_EDGES=[1.25,1.5,2,3,5,10,30,100,300,1000];
+const COMB_BANDS=["#f4d8c2","#efbd9c","#e9a077","#e08259","#d26541","#bd4b31","#a33726","#86271d","#661a16","#4a1110","#300b0b"];
+let VIEW="combined";try{VIEW=localStorage.getItem("rrm-view")||"combined"}catch(e){}
+const VIEWS={
+  combined:{h:"Combined: damage absorbed per kill",cls:"taken",note:"How much damage your corps take to kill the boss, as a multiple of normal: the damage-taken multiplier times how much longer the kill takes. One number for both sides. Green means no penalty at all: full damage dealt and normal damage taken.",
+    legend:()=>`<span>×1,000+</span><span class="ramp">${COMB_BANDS.slice().reverse().map(c=>`<i style="background:${c}"></i>`).join('')}</span><span>×1.25</span><span><i class="sw" style="background:var(--full)"></i> ×1.00, no penalty</span>`},
+  dealt:{h:"Damage dealt",cls:"dealt",note:"Your damage as a share of normal, in eight bands. Darker means under-resisted. Green means full damage: there is nothing more to gain.",
+    legend:()=>`<span>×0</span><span class="ramp">${rampD}</span><span>×1.00 · 8 bands</span><span><i class="sw" style="background:var(--full)"></i> full damage</span>`},
+  taken:{h:"Damage taken",cls:"taken",note:"The boss's damage to your corps as a multiple of normal: ×2 to ×80 at the left edge depending on boss and difficulty, falling to ×1 as resistance rises. Green means normal damage.",
+    legend:()=>`<span>×80</span><span class="ramp">${rampT}</span><span>×1.25</span><span><i class="sw" style="background:var(--full)"></i> ×1.00, normal damage</span>`}
+};
+if(!VIEWS[VIEW])VIEW="combined";
+$('raids').innerHTML=RAIDS.map(R=>`
   <div class="raid" id="raid-${R.id}">
     <div class="raidhead"><span class="eyebrow">${R.eyebrow}</span><h2 class="rtitle">${R.title}</h2></div>
     <section>
-      <h2 class="dealt">Damage dealt</h2>
-      <p class="note">Your damage as a share of normal, in eight bands. Darker means under-resisted. Green means full damage: there is nothing more to gain.</p>
-      <div class="heat"><canvas id="c-${R.id}-dealt" data-raid="${R.id}" data-kind="dealt" role="img" aria-label="${R.title}: heatmap of your damage multiplier for each boss and difficulty"></canvas></div>
-      <div class="legend"><span>×0</span><span class="ramp">${rampD}</span><span>×1.00 · 8 bands</span><span><i class="sw" style="background:var(--full)"></i> full damage</span></div>
+      <h2 class="vh"></h2>
+      <p class="note vnote"></p>
+      <div class="heat"><canvas id="c-${R.id}" data-raid="${R.id}" role="img" aria-label="${R.title}: heatmap for each boss and difficulty across resistance"></canvas></div>
+      <div class="legend vlegend"></div>
     </section>
-    <section>
-      <h2 class="taken">Damage taken</h2>
-      <p class="note">The boss's damage to your corps as a multiple of normal: from ×2 on ${first} difficulty 1 up to ×80 on ${last} difficulty 4, falling to ×1 as resistance rises. Green means normal damage.</p>
-      <div class="heat"><canvas id="c-${R.id}-taken" data-raid="${R.id}" data-kind="taken" role="img" aria-label="${R.title}: heatmap of the boss's damage multiplier against your corps for each boss and difficulty"></canvas></div>
-      <div class="legend"><span>×80</span><span class="ramp">${rampT}</span><span>×1.25</span><span><i class="sw" style="background:var(--full)"></i> ×1.00, normal damage</span></div>
-    </section>
-  </div>`}).join('');
+  </div>`).join('');
+function applyView(){
+  const v=VIEWS[VIEW];
+  document.querySelectorAll('.vh').forEach(h=>{h.textContent=v.h;h.className='vh '+v.cls});
+  document.querySelectorAll('.vnote').forEach(p=>p.textContent=v.note);
+  document.querySelectorAll('.vlegend').forEach(l=>l.innerHTML=v.legend());
+  document.querySelectorAll('.vbtn').forEach(b=>{const on=b.dataset.view===VIEW;b.classList.toggle('on',on);b.setAttribute('aria-pressed',String(on))});
+  try{localStorage.setItem("rrm-view",VIEW)}catch(e){}
+}
+document.querySelectorAll('.vbtn').forEach(b=>b.addEventListener('click',()=>{VIEW=b.dataset.view;applyView();drawAll()}));
+applyView();
 const LABEL_W=196,ROW_H=22,GROUP_GAP=10,TOP=8,AXIS_H=26;
 function layout(w,rows){const plotW=Math.max(260,w-LABEL_W-12);const L=rows.map(r=>({r,y:0}));L.forEach((o,i)=>{o.y=TOP+i*ROW_H+(o.r[0]-1)*GROUP_GAP});return{plotW,rows:L,h:L[L.length-1].y+ROW_H+AXIS_H}}
 const xToRes=(px,plotW)=>Math.round(Math.pow(10,LMIN+(px/plotW)*(LMAX-LMIN))/10)*10;
@@ -125,7 +149,7 @@ const raidOf=cv=>RAIDS.find(R=>R.id===cv.dataset.raid);
 const canvases=()=>[...document.querySelectorAll('canvas[data-raid]')];
 
 function draw(cv){
-  const R=raidOf(cv),kind=cv.dataset.kind,box=cv.parentElement,w=Math.max(500,box.clientWidth-20),L=layout(w,R.rows),dpr=window.devicePixelRatio||1;
+  const R=raidOf(cv),kind=VIEW,box=cv.parentElement,w=Math.max(500,box.clientWidth-20),L=layout(w,R.rows),dpr=window.devicePixelRatio||1;
   cv.width=w*dpr;cv.height=L.h*dpr;cv.style.width=w+'px';cv.style.height=L.h+'px';
   const g=cv.getContext('2d');g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,w,L.h);
   const ink=css('--ink'),ink2=css('--ink2'),muted=css('--muted'),full=css('--full'),grid=css('--grid'),line=css('--line');
@@ -134,6 +158,7 @@ function draw(cv){
     for(let px=0;px<L.plotW;px++){
       const x=xToRes(px+.5,L.plotW);let col;
       if(kind==='dealt'){const d=dealt(r,x);col=d>=1?full:DEALT_BANDS[Math.min(7,Math.floor(d*8))]}
+      else if(kind==='combined'){const c=combined(r,x);if(c<=1.0001)col=full;else{let k=COMB_EDGES.findIndex(e=>c<=e);if(k<0)k=COMB_EDGES.length;col=COMB_BANDS[k]}}
       else{const t=taken(r,x);if(t<=1.0001)col=full;else{let k=TAKEN_EDGES.findIndex(e=>t<=e);if(k<0)k=TAKEN_EDGES.length;col=TAKEN_BANDS[k]}}
       g.fillStyle=col;g.fillRect(LABEL_W+px,y+1,1.2,ROW_H-2);
     }
@@ -170,6 +195,7 @@ function hover(cv,e){
    <div class="ln"><span>Damage dealt</span><b style="color:var(--ember)">${Math.round(d*100)}% of normal</b></div>
    <div class="ln"><span>&nbsp; kill takes</span><b>${fmtX(1/d)} as long</b></div>
    <div class="ln"><span>Damage taken</span><b style="color:#c0392b">${fmtX(t)}</b></div>
+   <div class="ln"><span>Damage absorbed per kill</span><b>${t/d>=1000?'×'+n(t/d):fmtX(t/d)}</b></div>
    <div class="sep"></div>
    <div class="ln"><span>Recommended ${n(r[3])}</span><b>${gap(x,r[3])}</b></div>
    <div class="ln"><span>Normal damage taken at ${n(r[8])}</span><b>${gap(x,r[8])}</b></div>
