@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Fire Resistance Matrix</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a short intro, then two full-width heatmaps (damage dealt, damage taken) with a shared log resist axis,
+   20 rows grouped by difficulty; a cursor-following card gives the exact numbers. */
+:root{
+  --bg:#f5f2ee; --panel:#fffdfa; --ink:#1e1915; --ink2:#5a5049; --muted:#8a8078; --line:#e2dbd2; --grid:rgba(30,25,21,.10);
+  --ember:#b8521c; --full:#2f8f6b; --cool:#2f6fb5; --chip:#efe8df;
+  --display:"Barlow Condensed","Arial Narrow",sans-serif; --body:"IBM Plex Sans",system-ui,sans-serif; --mono:"IBM Plex Mono",ui-monospace,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#141110; --panel:#1c1816; --ink:#f2ece5; --ink2:#c4b9ae; --muted:#8e847a; --line:#332d28; --grid:rgba(242,236,229,.08);
+  --ember:#e8743a; --full:#3fae86; --cool:#5d9be0; --chip:#28221f; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#141110; --panel:#1c1816; --ink:#f2ece5; --ink2:#c4b9ae; --muted:#8e847a; --line:#332d28; --grid:rgba(242,236,229,.08);
+  --ember:#e8743a; --full:#3fae86; --cool:#5d9be0; --chip:#28221f; color-scheme:dark}
+body{background:var(--bg);color:var(--ink);font:15px/1.6 var(--body);padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:24px 48px}
+.wrap{max-width:1180px;margin:0 auto;display:flex;flex-direction:column;gap:22px}
+.eyebrow{font:500 12px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--ember)}
+h1{font:600 40px/1.02 var(--display);margin:4px 0 0;letter-spacing:.01em;text-wrap:balance}
+.lede{max-width:74ch;color:var(--ink2);margin:10px 0 0}
+.lede b{color:var(--ink);font-weight:600}
+.controls{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;font-size:13px;color:var(--ink2)}
+.controls label{display:inline-flex;gap:6px;align-items:center;cursor:pointer}
+section{display:flex;flex-direction:column;gap:8px}
+h2{font:600 15px var(--mono);letter-spacing:.12em;text-transform:uppercase;margin:0}
+h2.dealt{color:var(--ember)} h2.taken{color:#c0392b}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) h2.taken{color:#ef6b5b}}
+:root[data-theme="dark"] h2.taken{color:#ef6b5b}
+.note{max-width:78ch;color:var(--ink2);font-size:14px;margin:0}
+.heat{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 10px 6px;overflow-x:auto}
+.heat canvas{display:block;cursor:crosshair;touch-action:pan-y}
+.legend{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;font:400 12px var(--mono);color:var(--ink2)}
+.ramp{display:inline-flex;height:12px;border-radius:2px;overflow:hidden}
+.ramp i{display:block;width:16px;height:12px}
+.sw{display:inline-block;width:16px;height:12px;border-radius:2px;vertical-align:-2px}
+#pop{position:fixed;z-index:20;pointer-events:none;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:13px;line-height:1.45;width:300px;max-width:calc(100vw - 24px);box-shadow:0 8px 26px rgba(0,0,0,.22)}
+#pop h3{font:600 18px/1.1 var(--display);margin:0}
+#pop .r{font:500 12px var(--mono);color:var(--muted);margin:2px 0 6px}
+#pop .ln{display:flex;justify-content:space-between;gap:10px;font-variant-numeric:tabular-nums}
+#pop .ln b{font:500 13px var(--mono)}
+#pop .sep{border-top:1px solid var(--line);margin:6px 0}
+#pop .ok{color:var(--full)} #pop .no{color:var(--ink2)}
+.foot{font-size:12.5px;color:var(--muted);max-width:90ch}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Guild raid · Land of Fire</div>
+    <h1>Fire Resistance Damage Matrix</h1>
+    <p class="lede">Fire resistance scales the damage you <b>deal</b> to each boss and the damage your corps <b>take</b>. Each boss and difficulty has its own floor and ceiling, and resistance moves you in a straight line between them. Past the ceiling nothing changes. The axis is <b>logarithmic</b>, because full value runs from 160 resistance on difficulty 1 up to 13,600 on difficulty 4. Hover or tap either heatmap for the exact numbers at that resistance.</p>
+  </header>
+
+  <div class="controls">
+    <label><input type="checkbox" id="showFp" checked> Fire Priestess grades (raid pet, 0 pieces)</label>
+    <label><input type="checkbox" id="showRec" checked> Recommended resistance per row</label>
+  </div>
+
+  <section>
+    <h2 class="dealt">Damage dealt</h2>
+    <p class="note">Your damage as a share of normal, in eight bands. Darker means under-resisted. Green means full damage: there is nothing more to gain.</p>
+    <div class="heat"><canvas id="cDealt" role="img" aria-label="Heatmap of your damage multiplier for each boss and difficulty across fire resistance"></canvas></div>
+    <div class="legend"><span>×0</span><span class="ramp" id="rampDealt"></span><span>×1.00 · 8 bands</span><span><i class="sw" style="background:var(--full)"></i> full damage</span></div>
+  </section>
+
+  <section>
+    <h2 class="taken">Damage taken</h2>
+    <p class="note">The boss's damage to your corps as a multiple of normal. Every fire row starts above ×1 and falls to ×1 as resistance rises, from ×2 on Basilisk difficulty 1 up to ×80 on Fire Dragon Knight difficulty 4. Green means normal damage.</p>
+    <div class="heat"><canvas id="cTaken" role="img" aria-label="Heatmap of the boss's damage multiplier against your corps for each boss and difficulty across fire resistance"></canvas></div>
+    <div class="legend"><span>×80</span><span class="ramp" id="rampTaken"></span><span>×1.25</span><span><i class="sw" style="background:var(--full)"></i> ×1.00, normal damage</span></div>
+  </section>
+
+  <p class="foot">5 bosses × 4 difficulties · 10 to 20,000 resistance at 10-point resolution, log axis. Below each row's lower threshold the multipliers stay at their worst value, so 0 resistance reads the same as the left edge.</p>
+</div>
+<div id="pop" hidden></div>
+
+<script>
+/* diff, boss, level, recommend, dealMin, dealMax, dealFloor, takenMin, takenMax, takenTop */
+const BOSS={100005:"Basilisk",100008:"Sellaim",100006:"Ignis",100007:"Bahamut",100009:"Fire Dragon Knight"};
+const R=[[1,100005,20,96,20,160,.6,20,120,2],[1,100008,25,192,40,320,.5,40,240,2],[1,100006,30,384,80,640,.4,80,480,3],[1,100007,35,480,100,800,.3,100,600,5],[1,100009,40,720,150,1200,.2,150,900,6],
+[2,100005,45,960,200,1600,.1,200,1200,8],[2,100008,50,1200,250,2000,.09,250,1500,10],[2,100006,55,1440,300,2400,.08,300,1800,13],[2,100007,60,2400,500,4000,.07,500,3000,16],[2,100009,65,2880,600,4800,.06,600,3600,20],
+[3,100005,70,3360,700,5600,.05,700,4200,24],[3,100008,75,3840,800,6400,.045,800,4800,30],[3,100006,80,4800,1000,8000,.04,1000,6000,36],[3,100007,90,5280,1100,8800,.035,1100,6600,42],[3,100009,100,5760,1200,9600,.03,1200,7200,50],
+[4,100005,110,6240,1300,10400,.028,1300,7800,56],[4,100008,115,6720,1400,11200,.026,1400,8400,62],[4,100006,120,7200,1500,12000,.024,1500,9000,68],[4,100007,130,7680,1600,12800,.022,1600,9600,74],[4,100009,140,8160,1700,13600,.02,1700,10200,80]];
+const FP=[[1,300],[2,1100],[3,2400],[4,5000],[5,9700]];
+const lerp=(t,s,i,h,e)=>i<=s?1:h+(e-h)*Math.max(0,Math.min(1,(t-s)/(i-s)));
+const dealt=(r,x)=>lerp(x,r[4],r[5],r[6],1), taken=(r,x)=>lerp(x,r[7],r[8],r[9],1);
+const XMIN=10,XMAX=20000,LMIN=Math.log10(XMIN),LMAX=Math.log10(XMAX);
+const DEALT_BANDS=["#2a1d16","#3f2717","#573219","#713e1b","#8d4c1d","#ab5d20","#c97425","#e6912e"];
+const TAKEN_EDGES=[1.25,1.5,2,3,5,10,20,40];   // band k covers (edge k-1, edge k]; above 40 is the last band
+const TAKEN_BANDS=["#f2c9b4","#eaa98a","#e08765","#d06446","#b84632","#9b3125","#7c221c","#5c1714","#3f0f0e"];
+const $=id=>document.getElementById(id);
+const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const n=v=>Math.round(v).toLocaleString();
+const fmtX=v=>'×'+(v>=10?v.toFixed(1):v.toFixed(2));
+$('rampDealt').innerHTML=DEALT_BANDS.map(c=>`<i style="background:${c}"></i>`).join('');
+$('rampTaken').innerHTML=TAKEN_BANDS.slice().reverse().map(c=>`<i style="background:${c}"></i>`).join('');
+const LABEL_W=176,ROW_H=22,GROUP_GAP=10,TOP=8,AXIS_H=26;
+function layout(w){const plotW=Math.max(260,w-LABEL_W-12);const rows=R.map((r,i)=>({r,y:TOP+i*ROW_H+(r[0]-1)*GROUP_GAP}));return{plotW,rows,h:rows[rows.length-1].y+ROW_H+AXIS_H}}
+const xToRes=(px,plotW)=>Math.round(Math.pow(10,LMIN+(px/plotW)*(LMAX-LMIN))/10)*10;
+const resToX=(v,plotW)=>(Math.log10(Math.max(XMIN,v))-LMIN)/(LMAX-LMIN)*plotW;
+const showFp=()=>$('showFp').checked, showRec=()=>$('showRec').checked;
+
+function draw(cv,kind){
+  const box=cv.parentElement, w=Math.max(480,box.clientWidth-20), L=layout(w), dpr=window.devicePixelRatio||1;
+  cv.width=w*dpr;cv.height=L.h*dpr;cv.style.width=w+'px';cv.style.height=L.h+'px';
+  const g=cv.getContext('2d');g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,w,L.h);
+  const ink=css('--ink'),ink2=css('--ink2'),muted=css('--muted'),full=css('--full'),grid=css('--grid'),line=css('--line');
+  cv._L=L;cv._kind=kind;
+  for(const {r,y} of L.rows){
+    for(let px=0;px<L.plotW;px++){
+      const x=xToRes(px+.5,L.plotW);let col;
+      if(kind==='dealt'){const d=dealt(r,x);col=d>=1?full:DEALT_BANDS[Math.min(7,Math.floor(d*8))]}
+      else{const t=taken(r,x);if(t<=1.0001)col=full;else{let k=TAKEN_EDGES.findIndex(e=>t<=e);if(k<0)k=TAKEN_EDGES.length;col=TAKEN_BANDS[k]}}
+      g.fillStyle=col;g.fillRect(LABEL_W+px,y+1,1.2,ROW_H-2);
+    }
+    if(showRec()){const p=LABEL_W+resToX(r[3],L.plotW);g.fillStyle=ink;g.beginPath();g.moveTo(p-4,y+1);g.lineTo(p+4,y+1);g.lineTo(p,y+7);g.closePath();g.fill();}
+    g.fillStyle=ink;g.font='500 12px "IBM Plex Mono", monospace';g.textBaseline='middle';g.textAlign='left';
+    g.fillText(BOSS[r[1]],22,y+ROW_H/2);
+  }
+  // difficulty group labels and separators
+  for(let d=1;d<=4;d++){const rs=L.rows.filter(o=>o.r[0]===d),y0=rs[0].y,y1=rs[rs.length-1].y+ROW_H;
+    g.save();g.translate(9,(y0+y1)/2);g.rotate(-Math.PI/2);g.fillStyle=muted;g.font='500 10px "IBM Plex Mono", monospace';g.textAlign='center';g.fillText('DIFF '+d,0,0);g.restore();
+    if(d>1){g.strokeStyle=line;g.lineWidth=1;g.beginPath();g.moveTo(0,y0-GROUP_GAP/2);g.lineTo(LABEL_W+L.plotW,y0-GROUP_GAP/2);g.stroke();}}
+  // axis
+  const ay=L.rows[L.rows.length-1].y+ROW_H+4;
+  g.fillStyle=ink2;g.font='400 11px "IBM Plex Mono", monospace';g.textAlign='center';g.textBaseline='top';
+  for(const v of [10,20,50,100,200,500,1000,2000,5000,10000,20000]){const p=LABEL_W+resToX(v,L.plotW);
+    g.strokeStyle=grid;g.beginPath();g.moveTo(p,TOP);g.lineTo(p,ay-4);g.stroke();
+    if(v<20000)g.fillText(v.toLocaleString(),p,ay+2);}
+  if(showFp()){for(const [gr,v] of FP){const p=LABEL_W+resToX(v,L.plotW);g.save();g.strokeStyle=ink;g.globalAlpha=.75;g.setLineDash([3,3]);g.lineWidth=1.2;
+    g.beginPath();g.moveTo(p,TOP-2);g.lineTo(p,ay-4);g.stroke();g.restore();}}
+  if(cv._hover){const {px,row}=cv._hover;const p=LABEL_W+px;g.save();g.strokeStyle=ink;g.lineWidth=1;g.beginPath();g.moveTo(p,TOP-4);g.lineTo(p,ay-4);g.stroke();
+    if(row){g.strokeStyle=ink;g.lineWidth=1.5;g.strokeRect(LABEL_W+.5,row.y+.5,L.plotW-1,ROW_H-1);}g.restore();}
+}
+function drawAll(){draw($('cDealt'),'dealt');draw($('cTaken'),'taken')}
+
+function gap(at,target){return at>=target?`<span class="ok">reached (+${n(at-target)})</span>`:`<span class="no">needs +${n(target-at)}</span>`}
+function hover(cv,e){
+  const L=cv._L,rect=cv.getBoundingClientRect(),mx=e.clientX-rect.left,my=e.clientY-rect.top;
+  const px=mx-LABEL_W, row=L.rows.find(o=>my>=o.y&&my<o.y+ROW_H);
+  if(px<0||px>L.plotW||!row){leave();return}
+  const x=xToRes(px,L.plotW),r=row.r;
+  for(const c of [$('cDealt'),$('cTaken')]){c._hover={px,row:c===cv?row:c._L.rows.find(o=>o.r===r)};}
+  drawAll();
+  const d=dealt(r,x),t=taken(r,x),fp=FP.find(f=>f[1]>=x);
+  const p=$('pop');
+  p.innerHTML=`<h3>${BOSS[r[1]]}</h3><div class="r">difficulty ${r[0]} · level ${r[2]} · resistance ${n(x)}</div>
+   <div class="ln"><span>Damage dealt</span><b style="color:var(--ember)">${Math.round(d*100)}% of normal</b></div>
+   <div class="ln"><span>&nbsp; kill takes</span><b>${fmtX(1/d)} as long</b></div>
+   <div class="ln"><span>Damage taken</span><b style="color:#c0392b">${fmtX(t)}</b></div>
+   <div class="sep"></div>
+   <div class="ln"><span>Recommended ${n(r[3])}</span><b>${gap(x,r[3])}</b></div>
+   <div class="ln"><span>Normal damage taken at ${n(r[8])}</span><b>${gap(x,r[8])}</b></div>
+   <div class="ln"><span>Full damage dealt at ${n(r[5])}</span><b>${gap(x,r[5])}</b></div>
+   <div class="sep"></div>
+   <div class="ln"><span>Fire Priestess for this</span><b>${fp?`grade ${fp[0]} (${n(fp[1])})`:'above grade 5 alone'}</b></div>`;
+  p.hidden=false;
+  const w=p.offsetWidth,h=p.offsetHeight;let lx=e.clientX+16,ly=e.clientY+16;
+  if(lx+w>innerWidth-8)lx=e.clientX-w-16; if(lx<8)lx=8; if(ly+h>innerHeight-8)ly=Math.max(8,e.clientY-h-16);
+  p.style.left=lx+'px';p.style.top=ly+'px';
+}
+function leave(){for(const c of [$('cDealt'),$('cTaken')])c._hover=null;drawAll();$('pop').hidden=true}
+for(const cv of [$('cDealt'),$('cTaken')]){
+  cv.addEventListener('pointermove',e=>hover(cv,e));
+  cv.addEventListener('pointerdown',e=>hover(cv,e));
+  cv.addEventListener('pointerleave',leave);
+}
+$('showFp').addEventListener('change',drawAll);$('showRec').addEventListener('change',drawAll);
+let rt;addEventListener('resize',()=>{clearTimeout(rt);rt=setTimeout(drawAll,120)});
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change',drawAll);
+new MutationObserver(drawAll).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
+(document.fonts&&document.fonts.ready?document.fonts.ready:Promise.resolve()).then(drawAll);
+drawAll();
+</script>
+</body>
+</html>
